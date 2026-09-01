@@ -7,6 +7,7 @@ const {
   normalizeLoginIdentifier,
 } = require("../controllers/auth.controller");
 const { hashPublicEmail } = require("../controllers/user.controller");
+const { normalizeOrigins } = require("../config");
 
 test("normalizes username and email login identifiers consistently", () => {
   assert.equal(normalizeLoginIdentifier("  LenaFziyen  "), "lenafziyen");
@@ -57,4 +58,16 @@ test("rejects empty captcha tokens before processing auth requests", async () =>
 
   assert.equal(result.ok, false);
   assert.match(result.message, /captcha/i);
+});
+
+test("normalizes comma-separated frontend origins and trims whitespace", () => {
+  const origins = normalizeOrigins(
+    "https://unieventia-front-end.vercel.app, http://localhost:3000, https://127.0.0.1:3000 ",
+  );
+
+  assert.deepEqual(origins, [
+    "https://unieventia-front-end.vercel.app",
+    "http://localhost:3000",
+    "https://127.0.0.1:3000",
+  ]);
 });

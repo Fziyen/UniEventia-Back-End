@@ -15,13 +15,18 @@ app.disable("x-powered-by");
 app.use(
   cors({
     origin: (origin, callback) => {
-      if (!origin || config.frontendOrigins.includes(origin)) {
+      if (!origin) return callback(null, true);
+
+      if (config.isAllowedOrigin(origin, config.frontendOrigins)) {
         return callback(null, true);
       }
-      return callback(new Error("Origin is not allowed."));
+
+      console.warn(`Blocked CORS request from origin: ${origin}`);
+      return callback(null, false);
     },
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
+    credentials: true,
   }),
 );
 app.use((req, res, next) => {
