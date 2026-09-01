@@ -6,7 +6,10 @@ const {
   verifyRecaptchaToken,
   normalizeLoginIdentifier,
 } = require("../controllers/auth.controller");
-const { hashPublicEmail } = require("../controllers/user.controller");
+const {
+  hashPublicEmail,
+  validateProfileUpdateInput,
+} = require("../controllers/user.controller");
 const { normalizeOrigins } = require("../config");
 
 test("normalizes username and email login identifiers consistently", () => {
@@ -58,6 +61,31 @@ test("rejects empty captcha tokens before processing auth requests", async () =>
 
   assert.equal(result.ok, false);
   assert.match(result.message, /captcha/i);
+});
+
+test("accepts valid profile edits for username, email, role, and bio", () => {
+  const result = validateProfileUpdateInput({
+    username: "lena_new",
+    email: "lena+new@example.com",
+    role: "Organizer",
+    bio: "Planning better campus events.",
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.data.username, "lena_new");
+  assert.equal(result.data.email, "lena+new@example.com");
+  assert.equal(result.data.role, "Organizer");
+  assert.equal(result.data.bio, "Planning better campus events.");
+});
+
+test("rejects invalid username and role values on profile updates", () => {
+  const result = validateProfileUpdateInput({
+    username: "ab",
+    role: "Admin",
+  });
+
+  assert.equal(result.ok, false);
+  assert.match(result.message, /username|role/i);
 });
 
 test("normalizes comma-separated frontend origins and trims whitespace", () => {
