@@ -49,6 +49,22 @@ test("accepts valid organizer signup input", () => {
   assert.equal(result.message, "Validation successful");
 });
 
+test("rejects overly long signup field values", () => {
+  const longName = "A".repeat(51);
+  const longUsername = "B".repeat(31);
+  const result = validateSignupInput({
+    fname: longName,
+    lname: "Doe",
+    username: longUsername,
+    email: "user@example.com",
+    password: "StrongPass123",
+    role: "Participant",
+  });
+
+  assert.equal(result.ok, false);
+  assert.match(result.message, /first name|username/i);
+});
+
 test("creates a signed auth session for a newly registered user", () => {
   const payload = createAuthSession({
     _id: "user_123",

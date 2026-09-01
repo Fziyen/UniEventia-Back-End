@@ -57,6 +57,13 @@ const validateSignupInput = ({
     };
   }
 
+  if (firstName.length > 50 || lastName.length > 50) {
+    return {
+      ok: false,
+      message: "First name and last name must be 50 characters or fewer.",
+    };
+  }
+
   if (!normalizedUsername) {
     return {
       ok: false,
@@ -64,10 +71,10 @@ const validateSignupInput = ({
     };
   }
 
-  if (normalizedUsername.length < 3 || normalizedUsername.length > 30) {
+  if (normalizedUsername.length < 3 || normalizedUsername.length > 25) {
     return {
       ok: false,
-      message: "Username must be between 3 and 30 characters.",
+      message: "Username must be between 3 and 25 characters.",
     };
   }
 
@@ -86,10 +93,17 @@ const validateSignupInput = ({
     };
   }
 
-  if (normalizedPassword.length < 8) {
+  if (normalizedEmail.length > 254) {
     return {
       ok: false,
-      message: "Password must be at least 8 characters long.",
+      message: "Email must be 254 characters or fewer.",
+    };
+  }
+
+  if (normalizedPassword.length < 8 || normalizedPassword.length > 128) {
+    return {
+      ok: false,
+      message: "Password must be between 8 and 128 characters long.",
     };
   }
 
