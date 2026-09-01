@@ -3,6 +3,7 @@ const Event = require("../models/Events");
 const Notification = require("../models/Notifications");
 const Review = require("../models/Reviews");
 const EventComment = require("../models/EventComments");
+const User = require("../models/User");
 
 const validateEventInput = ({
   title,
@@ -150,13 +151,14 @@ exports.createEvent = async (req, res) => {
     return res.status(400).json({ message: validation.message });
   }
 
-  if (req.user.role !== "Organizer") {
-    return res
-      .status(403)
-      .json({ message: "Access denied. Only organizers can create events." });
-  }
-
   try {
+    const currentUser = await User.findById(req.user.id).select("role");
+    if (!currentUser || currentUser.role !== "Organizer") {
+      return res
+        .status(403)
+        .json({ message: "Access denied. Only organizers can create events." });
+    }
+
     // Check rate limit: max 8 events per 24 hours
     const rateLimitCheck = await checkEventCreationRateLimit(req.user.id);
 
@@ -510,11 +512,9 @@ exports.updateEvent = async (req, res) => {
 
     // Check if the requesting user is the organizer
     if (String(event.organizer._id) !== String(req.user.id)) {
-      return res
-        .status(403)
-        .json({
-          message: "Access denied. Only the organizer can update this event.",
-        });
+      return res.status(403).json({
+        message: "Access denied. Only the organizer can update this event.",
+      });
     }
 
     // Track which fields were updated

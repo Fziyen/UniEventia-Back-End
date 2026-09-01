@@ -1,7 +1,8 @@
 const jwt = require("jsonwebtoken");
 const config = require("../config");
+const User = require("../models/User");
 
-const auth = (req, res, next) => {
+const auth = async (req, res, next) => {
   const authHeader = req.header("Authorization");
   if (!authHeader || !/^Bearer\s+\S+$/i.test(authHeader)) {
     return res.status(401).send("Access denied. No token provided.");
@@ -11,10 +12,19 @@ const auth = (req, res, next) => {
 
   try {
     const decoded = jwt.verify(token, config.jwtSecret);
-    req.user = decoded;
+    const user = await User.findById(decoded.id).select("role");
+
+    if (!user) {
+      return res.status(401).send("User no longer exists.");
+    }
+
+    req.user = {
+      ...decoded,
+      role: user.role,
+    };
     next();
   } catch (ex) {
-    res.status(401).send("Invalid token.");
+    return res.status(401).send("Invalid token.");
   }
 };
 

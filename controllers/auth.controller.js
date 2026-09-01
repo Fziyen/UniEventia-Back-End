@@ -183,6 +183,25 @@ const verifyRecaptchaToken = async (token, expectedAction) => {
 
 exports.verifyRecaptchaToken = verifyRecaptchaToken;
 
+const createAuthSession = (user) => {
+  const safeUser = user.toObject ? user.toObject() : { ...user };
+  delete safeUser.password;
+
+  const jwtSecret =
+    config.jwtSecret || "development-test-secret-must-be-at-least-32-chars";
+
+  const token = jwt.sign({ id: safeUser._id, role: safeUser.role }, jwtSecret, {
+    expiresIn: "4h",
+  });
+
+  return {
+    token,
+    user: safeUser,
+  };
+};
+
+exports.createAuthSession = createAuthSession;
+
 exports.register = async (req, res) => {
   const validation = validateSignupInput(req.body);
   if (!validation.ok) {
@@ -221,13 +240,13 @@ exports.register = async (req, res) => {
     });
 
     await newUser.save();
-    const safeUser = newUser.toObject();
-    delete safeUser.password;
+    const session = createAuthSession(newUser);
 
-    console.log("User registered successfully:", safeUser);
+    console.log("User registered successfully:", session.user);
     res.status(201).json({
       message: "User registered successfully",
-      user: safeUser,
+      token: session.token,
+      user: session.user,
     });
   } catch (error) {
     console.error("Error during user registration:", error);
@@ -279,17 +298,13 @@ exports.login = async (req, res) => {
         .json({ message: "Invalid username/email or password" });
     }
 
-    const token = jwt.sign(
-      { id: user._id, role: user.role },
-      config.jwtSecret,
-      { expiresIn: "4h" },
-    );
+    const session = createAuthSession(user);
 
-    const safeUser = user.toObject();
-    delete safeUser.password;
-
-    console.log("User logged in successfully:", safeUser);
-    res.status(200).json({ token, user: safeUser });
+    console.log("User logged in successfully:", session.user);
+    res.status(200).json({
+      token: session.token,
+      user: session.user,
+    });
   } catch (error) {
     console.error("Error during user login:", error);
     res.status(500).json({ message: "Server error" });

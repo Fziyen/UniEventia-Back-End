@@ -5,6 +5,7 @@ const {
   validateSignupInput,
   verifyRecaptchaToken,
   normalizeLoginIdentifier,
+  createAuthSession,
 } = require("../controllers/auth.controller");
 const {
   hashPublicEmail,
@@ -46,6 +47,23 @@ test("accepts valid organizer signup input", () => {
 
   assert.equal(result.ok, true);
   assert.equal(result.message, "Validation successful");
+});
+
+test("creates a signed auth session for a newly registered user", () => {
+  const payload = createAuthSession({
+    _id: "user_123",
+    username: "new_user",
+    email: "new@example.com",
+    role: "Participant",
+    fname: "New",
+    lname: "User",
+  });
+
+  assert.equal(typeof payload.token, "string");
+  assert.equal(payload.user.username, "new_user");
+  assert.equal(payload.user.role, "Participant");
+  assert.equal(payload.user.email, "new@example.com");
+  assert.equal(payload.user.password, undefined);
 });
 
 test("hashes public email addresses before exposing them in community listings", () => {
