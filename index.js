@@ -8,6 +8,7 @@ const authRoutes = require("./routes/auth.routes");
 const eventRoutes = require("./routes/events.routes");
 const userRoutes = require("./routes/users.routes");
 const userNotification = require("./routes/notifications.routes");
+const { initializeCleanupJob } = require("./jobs/cleanupOldEvents");
 
 const app = express();
 app.disable("x-powered-by");
@@ -47,7 +48,11 @@ if (!config.mongoUri) {
 
 mongoose
   .connect(config.mongoUri)
-  .then(() => console.log("MongoDB connected"))
+  .then(() => {
+    console.log("MongoDB connected");
+    // Initialize the automatic cleanup job for old events
+    initializeCleanupJob();
+  })
   .catch((err) => {
     console.error("MongoDB connection error:", err.message);
     process.exitCode = 1;

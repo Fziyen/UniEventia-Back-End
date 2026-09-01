@@ -107,9 +107,42 @@ const getEventParticipationState = (event, userId) => {
   return "available";
 };
 
+// Rate limiting helper: Check 24-hour event creation limit
+const checkEventCreationRateLimit = async (organizerId) => {
+  const EVENTS_LIMIT_24H = 8;
+  const HOURS_24 = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
+
+  const twentyFourHoursAgo = new Date(Date.now() - HOURS_24);
+
+  try {
+    // Count events created by this organizer in the last 24 hours
+    const recentEventCount = await Event.countDocuments({
+      organizer: organizerId,
+      createdAt: { $gte: twentyFourHoursAgo },
+    });
+
+    return {
+      isAllowed: recentEventCount < EVENTS_LIMIT_24H,
+      currentCount: recentEventCount,
+      limit: EVENTS_LIMIT_24H,
+      remainingCount: Math.max(0, EVENTS_LIMIT_24H - recentEventCount),
+    };
+  } catch (error) {
+    // If there's a database error, log it and allow the request to proceed
+    console.error("Rate limit check error:", error);
+    return {
+      isAllowed: true,
+      currentCount: 0,
+      limit: EVENTS_LIMIT_24H,
+      remainingCount: EVENTS_LIMIT_24H,
+    };
+  }
+};
+
 exports.validateEventInput = validateEventInput;
 exports.validateParticipationInput = validateParticipationInput;
 exports.getEventParticipationState = getEventParticipationState;
+exports.checkEventCreationRateLimit = checkEventCreationRateLimit;
 
 exports.createEvent = async (req, res) => {
   const validation = validateEventInput(req.body);
@@ -123,15 +156,35 @@ exports.createEvent = async (req, res) => {
       .json({ message: "Access denied. Only organizers can create events." });
   }
 
-  const { title, description, startDate, endDate, location, maxParticipants } =
-    validation.data;
-  const coverImageFile =
-    req.files?.coverImage?.[0] || req.files?.image?.[0] || req.file;
-  const coverImage = coverImageFile
-    ? `/uploads/${coverImageFile.filename}`
-    : undefined;
-
   try {
+    // Check rate limit: max 8 events per 24 hours
+    const rateLimitCheck = await checkEventCreationRateLimit(req.user.id);
+
+    if (!rateLimitCheck.isAllowed) {
+      return res.status(429).json({
+        message: `Rate limit exceeded. You have reached the maximum of ${rateLimitCheck.limit} events per 24 hours.`,
+        errorCode: "RATE_LIMIT_EXCEEDED",
+        limit: rateLimitCheck.limit,
+        current: rateLimitCheck.currentCount,
+        remaining: rateLimitCheck.remainingCount,
+        resetTime: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+      });
+    }
+
+    const {
+      title,
+      description,
+      startDate,
+      endDate,
+      location,
+      maxParticipants,
+    } = validation.data;
+    const coverImageFile =
+      req.files?.coverImage?.[0] || req.files?.image?.[0] || req.file;
+    const coverImage = coverImageFile
+      ? `/uploads/${coverImageFile.filename}`
+      : undefined;
+
     const event = new Event({
       title,
       description,
@@ -143,9 +196,15 @@ exports.createEvent = async (req, res) => {
       coverImage,
     });
     await event.save();
+
     res.status(201).json({
       message: "Event created successfully",
       event,
+      rateLimit: {
+        limit: rateLimitCheck.limit,
+        current: rateLimitCheck.currentCount + 1, // Include the just-created event
+        remaining: rateLimitCheck.remainingCount - 1,
+      },
     });
   } catch (error) {
     res.status(400).json({ message: error.message || "Event creation failed" });
@@ -284,11 +343,9 @@ exports.participateEvent = async (req, res) => {
       return res.status(404).json({ message: "Event not found" });
     }
     if (String(event.organizer) === String(userId)) {
-      return res
-        .status(403)
-        .json({
-          message: "Organizers cannot participate in their own events.",
-        });
+      return res.status(403).json({
+        message: "Organizers cannot participate in their own events.",
+      });
     }
     if (new Date(event.startDate) <= new Date()) {
       return res
@@ -361,6 +418,49 @@ exports.removeParticipant = async (req, res) => {
   }
 };
 
+// Cancel/Withdraw participation from an event (authenticated user removes themselves)
+exports.cancelParticipation = async (req, res) => {
+  const { id } = req.params;
+  const userId = req.user.id;
+
+  try {
+    const event = await Event.findById(id).populate("organizer");
+    if (!event) {
+      return res.status(404).json({ message: "Event not found" });
+    }
+
+    const wasParticipant = event.participants.some(
+      (participantId) => String(participantId) === String(userId),
+    );
+
+    if (!wasParticipant) {
+      return res.status(400).json({
+        message: "You are not participating in this event",
+      });
+    }
+
+    // Remove the user from participants
+    event.participants.pull(userId);
+    await event.save();
+
+    // Notify the organizer about cancellation
+    const notification = new Notification({
+      recipient: event.organizer._id,
+      event: event._id,
+      message: `A participant has withdrawn from your event: ${event.title}`,
+      type: "participation",
+    });
+    await notification.save();
+
+    res.status(200).json({
+      message: "You have successfully withdrawn from this event",
+      event,
+    });
+  } catch (error) {
+    res.status(400).json({ message: error.message || "Cancellation failed" });
+  }
+};
+
 // Delete an event
 exports.deleteEvent = async (req, res) => {
   const { id } = req.params;
@@ -393,6 +493,118 @@ exports.updateCoverImage = async (req, res) => {
   }
 };
 
+// Update event details and notify all participants
+exports.updateEvent = async (req, res) => {
+  const { id } = req.params;
+  const validation = validateEventInput(req.body);
+
+  if (!validation.ok) {
+    return res.status(400).json({ message: validation.message });
+  }
+
+  try {
+    const event = await Event.findById(id).populate("organizer participants");
+    if (!event) {
+      return res.status(404).json({ message: "Event not found" });
+    }
+
+    // Check if the requesting user is the organizer
+    if (String(event.organizer._id) !== String(req.user.id)) {
+      return res
+        .status(403)
+        .json({
+          message: "Access denied. Only the organizer can update this event.",
+        });
+    }
+
+    // Track which fields were updated
+    const updatedFields = [];
+    const {
+      title,
+      description,
+      startDate,
+      endDate,
+      location,
+      maxParticipants,
+    } = validation.data;
+
+    if (event.title !== title) {
+      updatedFields.push(`Title: ${event.title} → ${title}`);
+      event.title = title;
+    }
+    if (event.description !== description) {
+      updatedFields.push(`Description updated`);
+      event.description = description;
+    }
+    if (
+      new Date(event.startDate).toISOString() !==
+      new Date(startDate).toISOString()
+    ) {
+      updatedFields.push(
+        `Start Date: ${new Date(event.startDate).toLocaleDateString()} → ${new Date(startDate).toLocaleDateString()}`,
+      );
+      event.startDate = startDate;
+    }
+    if (
+      new Date(event.endDate).toISOString() !== new Date(endDate).toISOString()
+    ) {
+      updatedFields.push(
+        `End Date: ${new Date(event.endDate).toLocaleDateString()} → ${new Date(endDate).toLocaleDateString()}`,
+      );
+      event.endDate = endDate;
+    }
+    if (event.location !== location) {
+      updatedFields.push(`Location: ${event.location} → ${location}`);
+      event.location = location;
+    }
+    if (event.maxParticipants !== maxParticipants) {
+      updatedFields.push(
+        `Max Participants: ${event.maxParticipants} → ${maxParticipants}`,
+      );
+      event.maxParticipants = maxParticipants;
+    }
+
+    // Handle cover image update if provided
+    if (req.file) {
+      updatedFields.push("Cover image updated");
+      event.coverImage = `/uploads/${req.file.filename}`;
+    }
+
+    // Save the updated event
+    await event.save();
+
+    // Send notifications to all participants about the event update
+    if (event.participants && event.participants.length > 0) {
+      const changesSummary =
+        updatedFields.length > 0
+          ? updatedFields.join(", ")
+          : "Event details updated";
+
+      const notificationPromises = event.participants.map((participant) => {
+        const notification = new Notification({
+          recipient: participant._id,
+          event: event._id,
+          message: `Event "${event.title}" has been updated: ${changesSummary}`,
+          type: "event_update",
+        });
+        return notification.save();
+      });
+
+      await Promise.all(notificationPromises);
+    }
+
+    // Populate the response with full details
+    await event.populate("organizer participants reviews comments");
+
+    res.status(200).json({
+      message: "Event updated successfully",
+      event,
+    });
+  } catch (error) {
+    res.status(400).json({ message: error.message || "Event update failed" });
+  }
+};
+
 exports.getEventsByOrganizer = async (req, res) => {
   try {
     const events = await Event.find({ organizer: req.user.id }).populate(
@@ -405,5 +617,27 @@ exports.getEventsByOrganizer = async (req, res) => {
     res.json(events);
   } catch (err) {
     res.status(500).send("Server error");
+  }
+};
+
+// Manual trigger for cleanup job (admin only - for testing and maintenance)
+exports.triggerCleanupJob = async (req, res) => {
+  try {
+    // In production, add authentication check here to ensure only admins can trigger
+    // For now, this endpoint should be protected by environment or API key
+    const { triggerCleanupNow } = require("../jobs/cleanupOldEvents");
+
+    const stats = await triggerCleanupNow();
+
+    res.status(200).json({
+      message: "Event cleanup completed",
+      stats,
+    });
+  } catch (error) {
+    console.error("Cleanup trigger error:", error);
+    res.status(500).json({
+      message: "Cleanup job failed",
+      error: error.message,
+    });
   }
 };

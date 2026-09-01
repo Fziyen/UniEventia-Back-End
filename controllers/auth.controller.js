@@ -19,9 +19,31 @@ const normalizeRole = (role) => {
   return "Participant";
 };
 
-const validateSignupInput = ({ fname, lname, email, password, role }) => {
+const escapeRegex = (value) =>
+  String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const normalizeLoginIdentifier = (identifier) => {
+  const normalized = String(identifier || "").trim();
+  if (!normalized) {
+    return "";
+  }
+
+  return normalized.toLowerCase();
+};
+
+exports.normalizeLoginIdentifier = normalizeLoginIdentifier;
+
+const validateSignupInput = ({
+  fname,
+  lname,
+  username,
+  email,
+  password,
+  role,
+}) => {
   const firstName = String(fname || "").trim();
   const lastName = String(lname || "").trim();
+  const normalizedUsername = String(username || "").trim();
   const normalizedEmail = String(email || "")
     .trim()
     .toLowerCase();
@@ -32,6 +54,28 @@ const validateSignupInput = ({ fname, lname, email, password, role }) => {
     return {
       ok: false,
       message: "First name and last name are required.",
+    };
+  }
+
+  if (!normalizedUsername) {
+    return {
+      ok: false,
+      message: "Username is required.",
+    };
+  }
+
+  if (normalizedUsername.length < 3 || normalizedUsername.length > 30) {
+    return {
+      ok: false,
+      message: "Username must be between 3 and 30 characters.",
+    };
+  }
+
+  if (!/^[a-zA-Z0-9_-]+$/.test(normalizedUsername)) {
+    return {
+      ok: false,
+      message:
+        "Username can only contain letters, numbers, underscores, and hyphens.",
     };
   }
 
@@ -66,6 +110,7 @@ const validateSignupInput = ({ fname, lname, email, password, role }) => {
     data: {
       fname: firstName,
       lname: lastName,
+      username: normalizedUsername,
       email: normalizedEmail,
       password: normalizedPassword,
       role: normalizedRole,
@@ -149,18 +194,27 @@ exports.register = async (req, res) => {
     return res.status(400).json({ message: captcha.message });
   }
 
-  const { fname, lname, email, password, role } = validation.data;
+  const { fname, lname, username, email, password, role } = validation.data;
 
   try {
-    const existingUser = await User.findOne({ email: email.toLowerCase() });
+    // Check if email or username already exists
+    const existingUser = await User.findOne({
+      $or: [{ email: email.toLowerCase() }, { username }],
+    });
     if (existingUser) {
-      return res.status(400).json({ message: "User already exists" });
+      return res.status(400).json({
+        message:
+          existingUser.email === email.toLowerCase()
+            ? "Email already registered"
+            : "Username already taken",
+      });
     }
 
     const hashedPassword = await bcrypt.hash(password, saltRounds);
     const newUser = new User({
       fname,
       lname,
+      username,
       email,
       password: hashedPassword,
       role,
@@ -177,14 +231,20 @@ exports.register = async (req, res) => {
     });
   } catch (error) {
     console.error("Error during user registration:", error);
+    if (error.code === 11000) {
+      const field = Object.keys(error.keyPattern)[0];
+      return res.status(400).json({
+        message: `${field === "username" ? "Username" : "Email"} already in use`,
+      });
+    }
     res.status(500).json({ message: "Server error" });
   }
 };
 
 exports.login = async (req, res) => {
-  const email = String(req.body.email || "")
-    .trim()
-    .toLowerCase();
+  const identifier = normalizeLoginIdentifier(
+    req.body.identifier ?? req.body.email ?? req.body.username,
+  );
   const password = String(req.body.password || "").trim();
 
   const captcha = await verifyRecaptchaToken(req.body.recaptcha, "login");
@@ -193,15 +253,30 @@ exports.login = async (req, res) => {
   }
 
   try {
-    const user = await User.findOne({ email });
+    const user = await User.findOne({
+      $or: [
+        { email: identifier },
+        {
+          username: {
+            $regex: `^${escapeRegex(identifier)}$`,
+            $options: "i",
+          },
+        },
+      ],
+    });
+
     if (!user) {
-      console.error("User not found with email:", email);
-      return res.status(401).json({ message: "Invalid email or password" });
+      console.error("User not found with identifier:", identifier);
+      return res
+        .status(401)
+        .json({ message: "Invalid username/email or password" });
     }
 
     const isPasswordValid = await bcrypt.compare(password, user.password);
     if (!isPasswordValid) {
-      return res.status(401).json({ message: "Invalid email or password" });
+      return res
+        .status(401)
+        .json({ message: "Invalid username/email or password" });
     }
 
     const token = jwt.sign(

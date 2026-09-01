@@ -6,6 +6,7 @@ const ALLOWED_TYPES = [
   "invitation",
   "reminder",
   "system",
+  "event_update",
 ];
 const normalizeType = (v) => {
   const t = String(v || "")
@@ -49,7 +50,7 @@ const notificationSchema = new mongoose.Schema(
     // keep createdAt field name for compatibility, and add updatedAt
     timestamps: { createdAt: "createdAt", updatedAt: "updatedAt" },
     versionKey: false,
-  }
+  },
 );
 
 // Helpful indexes for common queries

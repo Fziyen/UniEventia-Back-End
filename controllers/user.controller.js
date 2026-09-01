@@ -1,5 +1,19 @@
+const crypto = require("crypto");
 const User = require("../models/User");
 const path = require("path");
+
+const hashPublicEmail = (email) => {
+  const normalized = String(email || "")
+    .trim()
+    .toLowerCase();
+  if (!normalized) {
+    return "";
+  }
+
+  return crypto.createHash("sha256").update(normalized).digest("hex");
+};
+
+exports.hashPublicEmail = hashPublicEmail;
 
 // Get User Profile
 exports.getUserProfile = async (req, res) => {
@@ -25,6 +39,7 @@ exports.getAllUsers = async (req, res) => {
           $or: [
             { fname: { $regex: escapedSearch, $options: "i" } },
             { lname: { $regex: escapedSearch, $options: "i" } },
+            { username: { $regex: escapedSearch, $options: "i" } },
           ],
         }
       : {};
@@ -36,8 +51,15 @@ exports.getAllUsers = async (req, res) => {
         .limit(limit),
       User.countDocuments(query),
     ]);
+
+    const publicUsers = users.map((user) => {
+      const safeUser = user.toObject ? user.toObject() : { ...user };
+      safeUser.email = hashPublicEmail(safeUser.email);
+      return safeUser;
+    });
+
     res.status(200).json({
-      items: users,
+      items: publicUsers,
       page,
       limit,
       total,
@@ -51,7 +73,7 @@ exports.getAllUsers = async (req, res) => {
 // Update User Profile
 exports.updateUserProfile = async (req, res) => {
   try {
-    const allowedFields = ["fname", "lname", "email"];
+    const allowedFields = ["fname", "lname", "bio"];
     const updates = Object.fromEntries(
       allowedFields
         .filter((field) => req.body[field] !== undefined)
