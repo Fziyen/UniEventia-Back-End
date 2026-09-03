@@ -16,7 +16,7 @@ const validateEventInput = ({
   const normalizedTitle = String(title || "").trim();
   const normalizedDescription = String(description || "").trim();
   const normalizedLocation = String(location || "").trim();
-  const normalizedCapacity = Number(maxParticipants || 50);
+  const normalizedCapacity = Number(maxParticipants ?? 50);
 
   if (!normalizedTitle || !normalizedDescription || !normalizedLocation) {
     return {
@@ -47,10 +47,10 @@ const validateEventInput = ({
     };
   }
 
-  if (end < start) {
+  if (end <= start) {
     return {
       ok: false,
-      message: "End date cannot be before the start date.",
+      message: "End date must be after the start date.",
     };
   }
 
@@ -623,8 +623,6 @@ exports.getEventsByOrganizer = async (req, res) => {
 // Manual trigger for cleanup job (admin only - for testing and maintenance)
 exports.triggerCleanupJob = async (req, res) => {
   try {
-    // In production, add authentication check here to ensure only admins can trigger
-    // For now, this endpoint should be protected by environment or API key
     const { triggerCleanupNow } = require("../jobs/cleanupOldEvents");
 
     const stats = await triggerCleanupNow();

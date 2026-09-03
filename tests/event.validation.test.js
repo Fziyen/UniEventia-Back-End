@@ -6,7 +6,7 @@ const {
   getEventParticipationState,
 } = require("../controllers/event.controller");
 
-test("rejects events whose end date is before the start date", () => {
+test("rejects events whose end date is not after the start date", () => {
   const result = validateEventInput({
     title: "Hack Night",
     description: "Hands-on workshop for the team.",
@@ -16,7 +16,20 @@ test("rejects events whose end date is before the start date", () => {
   });
 
   assert.equal(result.ok, false);
-  assert.match(result.message, /before/i);
+  assert.match(result.message, /after/i);
+});
+
+test("rejects events with identical start and end timestamps", () => {
+  const result = validateEventInput({
+    title: "Zero Length Event",
+    description: "This event has no duration.",
+    startDate: "2026-09-10T18:00:00.000Z",
+    endDate: "2026-09-10T18:00:00.000Z",
+    location: "Helsinki",
+  });
+
+  assert.equal(result.ok, false);
+  assert.match(result.message, /after/i);
 });
 
 test("accepts a valid future event payload", () => {
@@ -38,7 +51,7 @@ test("rejects invalid participant capacity", () => {
     title: "Small Workshop",
     description: "A focused session.",
     startDate: "2026-09-10",
-    endDate: "2026-09-10",
+    endDate: "2026-09-11",
     location: "Espoo",
     maxParticipants: 0,
   });
