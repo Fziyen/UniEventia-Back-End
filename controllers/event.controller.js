@@ -12,6 +12,33 @@ const {
 } = require("../services/imageStorage");
 const { deleteEventAndAssociatedData } = require("../services/cascadeDeletion");
 
+const publicProfileFields =
+  "fname lname username email emailPublic profilePicture bio role createdAt";
+
+const stripPrivateEmails = (events) => {
+  const sanitizeUser = (user) => {
+    if (!user || typeof user !== "object") return user;
+    const safeUser = user.toObject ? user.toObject() : { ...user };
+    if (!safeUser.emailPublic) delete safeUser.email;
+    return safeUser;
+  };
+
+  return events.map((event) => {
+    const plainEvent = event.toObject ? event.toObject() : event;
+    plainEvent.organizer = sanitizeUser(plainEvent.organizer);
+    plainEvent.participants = (plainEvent.participants || []).map(sanitizeUser);
+    plainEvent.reviews = (plainEvent.reviews || []).map((review) => ({
+      ...review,
+      user: sanitizeUser(review.user),
+    }));
+    plainEvent.comments = (plainEvent.comments || []).map((comment) => ({
+      ...comment,
+      user: sanitizeUser(comment.user),
+    }));
+    return plainEvent;
+  });
+};
+
 const validateEventInput = ({
   title,
   description,
@@ -228,20 +255,17 @@ exports.createEvent = async (req, res) => {
 exports.getEvents = async (req, res) => {
   try {
     const events = await Event.find()
-      .populate(
-        "organizer participants",
-        "fname lname username profilePicture bio role createdAt",
-      )
+      .populate("organizer participants", publicProfileFields)
       .populate("reviews comments");
     await Review.populate(events, {
       path: "reviews.user",
-      select: "fname lname username profilePicture bio role createdAt",
+      select: publicProfileFields,
     });
     await EventComment.populate(events, {
       path: "comments.user",
-      select: "fname lname username profilePicture bio role createdAt",
+      select: publicProfileFields,
     });
-    res.status(200).json(events);
+    res.status(200).json(stripPrivateEmails(events));
   } catch (error) {
     res.status(400).send(error.message);
   }
@@ -251,23 +275,20 @@ exports.getEvents = async (req, res) => {
 exports.getEventById = async (req, res) => {
   try {
     const event = await Event.findById(req.params.id)
-      .populate(
-        "organizer participants",
-        "fname lname username profilePicture bio role createdAt",
-      )
+      .populate("organizer participants", publicProfileFields)
       .populate("reviews comments");
     await Review.populate(event, {
       path: "reviews.user",
-      select: "fname lname username profilePicture bio role createdAt",
+      select: publicProfileFields,
     });
     await EventComment.populate(event, {
       path: "comments.user",
-      select: "fname lname username profilePicture bio role createdAt",
+      select: publicProfileFields,
     });
     if (!event) {
       return res.status(404).send("Event not found");
     }
-    res.status(200).json(event);
+    res.status(200).json(stripPrivateEmails([event])[0]);
   } catch (error) {
     res.status(400).send(error.message);
   }
@@ -673,16 +694,13 @@ exports.updateEvent = async (req, res) => {
 exports.getEventsByOrganizer = async (req, res) => {
   try {
     const events = await Event.find({ organizer: req.user.id })
-      .populate(
-        "organizer participants",
-        "fname lname username profilePicture bio role createdAt",
-      )
+      .populate("organizer participants", publicProfileFields)
       .populate("reviews");
     await Review.populate(events, {
       path: "reviews.user",
-      select: "fname lname username profilePicture bio role createdAt",
+      select: publicProfileFields,
     });
-    res.json(events);
+    res.json(stripPrivateEmails(events));
   } catch (err) {
     res.status(500).send("Server error");
   }

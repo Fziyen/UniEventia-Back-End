@@ -103,6 +103,7 @@ test("accepts valid profile edits for username, email, role, and bio", () => {
     email: "lena+new@example.com",
     role: "Organizer",
     bio: "Planning better campus events.",
+    emailPublic: true,
   });
 
   assert.equal(result.ok, true);
@@ -110,6 +111,7 @@ test("accepts valid profile edits for username, email, role, and bio", () => {
   assert.equal(result.data.email, "lena+new@example.com");
   assert.equal(result.data.role, "Organizer");
   assert.equal(result.data.bio, "Planning better campus events.");
+  assert.equal(result.data.emailPublic, true);
 });
 
 test("rejects invalid username and role values on profile updates", () => {

@@ -98,6 +98,13 @@ const validateProfileUpdateInput = (payload = {}) => {
     updates.bio = String(payload.bio || "").trim() || null;
   }
 
+  if (payload.emailPublic !== undefined) {
+    if (typeof payload.emailPublic !== "boolean") {
+      return { ok: false, message: "Email visibility must be true or false." };
+    }
+    updates.emailPublic = payload.emailPublic;
+  }
+
   if (Object.keys(updates).length === 0) {
     return { ok: false, message: "No profile changes were provided." };
   }
@@ -146,7 +153,7 @@ exports.getAllUsers = async (req, res) => {
 
     const publicUsers = users.map((user) => {
       const safeUser = user.toObject ? user.toObject() : { ...user };
-      safeUser.email = hashPublicEmail(safeUser.email);
+      if (!safeUser.emailPublic) delete safeUser.email;
       return safeUser;
     });
 
@@ -165,10 +172,12 @@ exports.getAllUsers = async (req, res) => {
 exports.getPublicUserById = async (req, res) => {
   try {
     const user = await User.findById(req.params.id).select(
-      "fname lname username profilePicture bio role createdAt",
+      "fname lname username email emailPublic profilePicture bio role createdAt",
     );
     if (!user) return res.status(404).json({ message: "User not found" });
-    res.status(200).json(user);
+    const publicUser = user.toObject();
+    if (!publicUser.emailPublic) delete publicUser.email;
+    res.status(200).json(publicUser);
   } catch (error) {
     res.status(400).json({ message: "Unable to load user profile." });
   }
