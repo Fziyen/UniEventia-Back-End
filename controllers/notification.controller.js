@@ -159,6 +159,16 @@ async function removeNotification(req, res) {
   }
 }
 
+// Delete all notifications belonging to the authenticated user
+async function removeAllNotifications(req, res) {
+  try {
+    const result = await Notification.deleteMany({ recipient: req.user.id });
+    res.status(200).json({ deletedCount: result.deletedCount });
+  } catch (error) {
+    res.status(500).json({ message: "Unable to delete notifications." });
+  }
+}
+
 module.exports = {
   setIo,
   createNotification,
@@ -167,4 +177,5 @@ module.exports = {
   markRead,
   markAllRead,
   removeNotification,
+  removeAllNotifications,
 };
