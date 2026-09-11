@@ -227,16 +227,19 @@ exports.createEvent = async (req, res) => {
 // Get all events
 exports.getEvents = async (req, res) => {
   try {
-    const events = await Event.find().populate(
-      "organizer participants reviews comments",
-    );
+    const events = await Event.find()
+      .populate(
+        "organizer participants",
+        "fname lname username profilePicture bio role createdAt",
+      )
+      .populate("reviews comments");
     await Review.populate(events, {
       path: "reviews.user",
-      select: "fname lname name profilePicture",
+      select: "fname lname username profilePicture bio role createdAt",
     });
     await EventComment.populate(events, {
       path: "comments.user",
-      select: "fname lname profilePicture",
+      select: "fname lname username profilePicture bio role createdAt",
     });
     res.status(200).json(events);
   } catch (error) {
@@ -247,9 +250,20 @@ exports.getEvents = async (req, res) => {
 // Get a single event by ID
 exports.getEventById = async (req, res) => {
   try {
-    const event = await Event.findById(req.params.id).populate(
-      "organizer participants reviews comments",
-    );
+    const event = await Event.findById(req.params.id)
+      .populate(
+        "organizer participants",
+        "fname lname username profilePicture bio role createdAt",
+      )
+      .populate("reviews comments");
+    await Review.populate(event, {
+      path: "reviews.user",
+      select: "fname lname username profilePicture bio role createdAt",
+    });
+    await EventComment.populate(event, {
+      path: "comments.user",
+      select: "fname lname username profilePicture bio role createdAt",
+    });
     if (!event) {
       return res.status(404).send("Event not found");
     }
@@ -658,12 +672,15 @@ exports.updateEvent = async (req, res) => {
 
 exports.getEventsByOrganizer = async (req, res) => {
   try {
-    const events = await Event.find({ organizer: req.user.id }).populate(
-      "organizer participants reviews",
-    );
+    const events = await Event.find({ organizer: req.user.id })
+      .populate(
+        "organizer participants",
+        "fname lname username profilePicture bio role createdAt",
+      )
+      .populate("reviews");
     await Review.populate(events, {
       path: "reviews.user",
-      select: "fname lname profilePicture email",
+      select: "fname lname username profilePicture bio role createdAt",
     });
     res.json(events);
   } catch (err) {

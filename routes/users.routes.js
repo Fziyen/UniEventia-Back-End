@@ -7,6 +7,7 @@ const {
   updateProfilePicture,
   getAllUsers,
   getProfilePicture,
+  getPublicUserById,
 } = require("../controllers/user.controller");
 const auth = require("../middlewares/auth.middleware");
 const upload = require("../middlewares/upload");
@@ -15,6 +16,7 @@ const router = express.Router();
 
 router.get("/profile", auth, getUserProfile);
 router.get("/:id/profile-picture", getProfilePicture);
+router.get("/:id/public", getPublicUserById);
 router.put("/profile", auth, updateUserProfile);
 router.delete("/profile", auth, deleteUserProfile);
 router.get("/", auth, getAllUsers);
