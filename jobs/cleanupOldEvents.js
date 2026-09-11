@@ -1,64 +1,8 @@
 const Event = require("../models/Events");
-const Review = require("../models/Reviews");
-const EventComment = require("../models/EventComments");
-const Notification = require("../models/Notifications");
-const { deleteImage } = require("../services/imageStorage");
+const { deleteEventAndAssociatedData } = require("../services/cascadeDeletion");
 
 const DAYS_TO_RETAIN = 31; // Keep events for 31 days after they end
 const CLEANUP_INTERVAL = 24 * 60 * 60 * 1000; // Run cleanup daily
-
-/**
- * Delete an event and all its associated data
- * @param {Object} event - The event document to delete
- * @returns {Promise<Object>} - Deletion statistics
- */
-const deleteEventAndAssociatedData = async (event) => {
-  const stats = {
-    eventDeleted: false,
-    reviewsDeleted: 0,
-    commentsDeleted: 0,
-    notificationsDeleted: 0,
-    fileDeleted: false,
-    error: null,
-  };
-
-  try {
-    const eventId = event._id;
-
-    stats.fileDeleted = await deleteImage(event.coverImageFileId);
-
-    // Delete all reviews associated with this event
-    const reviewsResult = await Review.deleteMany({ event: eventId });
-    stats.reviewsDeleted = reviewsResult.deletedCount;
-
-    // Delete all comments associated with this event
-    const commentsResult = await EventComment.deleteMany({ event: eventId });
-    stats.commentsDeleted = commentsResult.deletedCount;
-
-    // Delete all notifications associated with this event
-    const notificationsResult = await Notification.deleteMany({
-      event: eventId,
-    });
-    stats.notificationsDeleted = notificationsResult.deletedCount;
-
-    // Delete the event itself
-    const eventResult = await Event.deleteOne({ _id: eventId });
-    stats.eventDeleted = eventResult.deletedCount > 0;
-
-    if (stats.eventDeleted) {
-      console.log(
-        `[Cleanup] Deleted event "${event.title}" (ID: ${eventId}) and associated data:`,
-        stats,
-      );
-    }
-
-    return stats;
-  } catch (error) {
-    stats.error = error.message;
-    console.error(`Error deleting event ${event._id}:`, error);
-    return stats;
-  }
-};
 
 /**
  * Main cleanup function that finds and deletes events older than DAYS_TO_RETAIN
@@ -84,6 +28,7 @@ const cleanupOldEvents = async () => {
         totalEventsCleaned: 0,
         totalReviewsDeleted: 0,
         totalCommentsDeleted: 0,
+        totalRegistrationsDeleted: 0,
         totalNotificationsDeleted: 0,
         totalFilesDeleted: 0,
         errors: 0,
@@ -96,6 +41,7 @@ const cleanupOldEvents = async () => {
       totalEventsCleaned: 0,
       totalReviewsDeleted: 0,
       totalCommentsDeleted: 0,
+      totalRegistrationsDeleted: 0,
       totalNotificationsDeleted: 0,
       totalFilesDeleted: 0,
       errors: 0,
@@ -109,6 +55,7 @@ const cleanupOldEvents = async () => {
         totalStats.totalEventsCleaned += 1;
         totalStats.totalReviewsDeleted += stats.reviewsDeleted;
         totalStats.totalCommentsDeleted += stats.commentsDeleted;
+        totalStats.totalRegistrationsDeleted += stats.registrationsDeleted;
         totalStats.totalNotificationsDeleted += stats.notificationsDeleted;
         if (stats.fileDeleted) totalStats.totalFilesDeleted += 1;
       }
@@ -127,6 +74,7 @@ const cleanupOldEvents = async () => {
       totalEventsCleaned: 0,
       totalReviewsDeleted: 0,
       totalCommentsDeleted: 0,
+      totalRegistrationsDeleted: 0,
       totalNotificationsDeleted: 0,
       totalFilesDeleted: 0,
       errors: 1,

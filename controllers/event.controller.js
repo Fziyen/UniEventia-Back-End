@@ -10,6 +10,7 @@ const {
   streamImage,
   deleteImage,
 } = require("../services/imageStorage");
+const { deleteEventAndAssociatedData } = require("../services/cascadeDeletion");
 
 const validateEventInput = ({
   title,
@@ -500,11 +501,11 @@ exports.cancelParticipation = async (req, res) => {
 exports.deleteEvent = async (req, res) => {
   const { id } = req.params;
   try {
-    const deletedEvent = await Event.findByIdAndDelete(id);
-    if (!deletedEvent) {
+    const event = await Event.findById(id);
+    if (!event) {
       return res.status(404).send("Event not found");
     }
-    await deleteImage(deletedEvent.coverImageFileId);
+    await deleteEventAndAssociatedData(event);
     res.status(200).json({ message: "Event deleted successfully" });
   } catch (err) {
     res.status(500).json({ error: err.message });

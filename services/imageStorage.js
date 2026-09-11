@@ -53,7 +53,7 @@ const deleteImage = async (fileId) => {
     await getBucket().delete(new ObjectId(String(fileId)));
     return true;
   } catch (error) {
-    if (error.code === "ENOENT") return false;
+    if (error.code === "ENOENT" || error.code === 26) return false;
     throw error;
   }
 };

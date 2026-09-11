@@ -6,6 +6,7 @@ const {
   streamImage,
   deleteImage,
 } = require("../services/imageStorage");
+const { deleteUserAndAssociatedData } = require("../services/cascadeDeletion");
 const path = require("path");
 
 const normalizeRole = (role) => {
@@ -228,7 +229,7 @@ exports.deleteUserProfile = async (req, res) => {
       return res.status(404).send("User not found");
     }
 
-    await user.deleteOne();
+    await deleteUserAndAssociatedData(user);
     res.status(200).json({ message: "User deleted successfully" });
   } catch (error) {
     res.status(400).send(error.message);
