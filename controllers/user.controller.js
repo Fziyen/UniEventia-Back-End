@@ -1,5 +1,11 @@
 const crypto = require("crypto");
 const User = require("../models/User");
+const {
+  getImage,
+  storeImage,
+  streamImage,
+  deleteImage,
+} = require("../services/imageStorage");
 const path = require("path");
 
 const normalizeRole = (role) => {
@@ -238,10 +244,38 @@ exports.updateProfilePicture = async (req, res) => {
     if (!user) {
       return res.status(404).send("User not found");
     }
-    user.profilePicture = `/uploads/${req.file.filename}`;
+    const oldImageFileId = user.profilePictureFileId;
+    user.profilePictureFileId = await storeImage({
+      buffer: req.file.buffer,
+      filename: req.file.originalname,
+      contentType: req.file.mimetype,
+    });
+    user.profilePicture = `/api/users/${user._id}/profile-picture`;
     await user.save();
+    await deleteImage(oldImageFileId);
     res.status(200).json(user);
   } catch (error) {
     res.status(400).send(error);
+  }
+};
+
+exports.getProfilePicture = async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id).select(
+      "profilePictureFileId",
+    );
+    if (!user || !user.profilePictureFileId) return res.status(404).end();
+
+    const image = await getImage(user.profilePictureFileId);
+    if (!image) return res.status(404).end();
+
+    res.setHeader(
+      "Content-Type",
+      image.contentType || "application/octet-stream",
+    );
+    res.setHeader("Content-Length", image.length);
+    streamImage(user.profilePictureFileId, res);
+  } catch (error) {
+    res.status(400).send(error.message);
   }
 };

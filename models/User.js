@@ -77,6 +77,10 @@ const userSchema = new mongoose.Schema({
     type: String,
     default: null,
   },
+  profilePictureFileId: {
+    type: mongoose.Schema.Types.ObjectId,
+    default: null,
+  },
   bio: {
     type: String,
     default: null,

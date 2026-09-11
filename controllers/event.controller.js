@@ -4,6 +4,12 @@ const Notification = require("../models/Notifications");
 const Review = require("../models/Reviews");
 const EventComment = require("../models/EventComments");
 const User = require("../models/User");
+const {
+  storeImage,
+  getImage,
+  streamImage,
+  deleteImage,
+} = require("../services/imageStorage");
 
 const validateEventInput = ({
   title,
@@ -183,10 +189,6 @@ exports.createEvent = async (req, res) => {
     } = validation.data;
     const coverImageFile =
       req.files?.coverImage?.[0] || req.files?.image?.[0] || req.file;
-    const coverImage = coverImageFile
-      ? `/uploads/${coverImageFile.filename}`
-      : undefined;
-
     const event = new Event({
       title,
       description,
@@ -195,8 +197,16 @@ exports.createEvent = async (req, res) => {
       location,
       maxParticipants,
       organizer: req.user.id,
-      coverImage,
     });
+
+    if (coverImageFile) {
+      event.coverImageFileId = await storeImage({
+        buffer: coverImageFile.buffer,
+        filename: coverImageFile.originalname,
+        contentType: coverImageFile.mimetype,
+      });
+      event.coverImage = `/api/events/${event._id}/image`;
+    }
     await event.save();
 
     res.status(201).json({
@@ -243,6 +253,29 @@ exports.getEventById = async (req, res) => {
       return res.status(404).send("Event not found");
     }
     res.status(200).json(event);
+  } catch (error) {
+    res.status(400).send(error.message);
+  }
+};
+
+exports.getEventImage = async (req, res) => {
+  try {
+    const event = await Event.findById(req.params.id).select(
+      "coverImageFileId",
+    );
+    if (!event || !event.coverImageFileId) {
+      return res.status(404).end();
+    }
+
+    const image = await getImage(event.coverImageFileId);
+    if (!image) return res.status(404).end();
+
+    res.setHeader(
+      "Content-Type",
+      image.contentType || "application/octet-stream",
+    );
+    res.setHeader("Content-Length", image.length);
+    streamImage(event.coverImageFileId, res);
   } catch (error) {
     res.status(400).send(error.message);
   }
@@ -471,6 +504,7 @@ exports.deleteEvent = async (req, res) => {
     if (!deletedEvent) {
       return res.status(404).send("Event not found");
     }
+    await deleteImage(deletedEvent.coverImageFileId);
     res.status(200).json({ message: "Event deleted successfully" });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -487,8 +521,15 @@ exports.updateCoverImage = async (req, res) => {
     if (!event) {
       return res.status(404).send("Event not found");
     }
-    event.coverImage = `/uploads/${req.file.filename}`;
+    const oldImageFileId = event.coverImageFileId;
+    event.coverImageFileId = await storeImage({
+      buffer: req.file.buffer,
+      filename: req.file.originalname,
+      contentType: req.file.mimetype,
+    });
+    event.coverImage = `/api/events/${event._id}/image`;
     await event.save();
+    await deleteImage(oldImageFileId);
     res.status(200).json(event);
   } catch (error) {
     res.status(400).send(error.message);
@@ -564,14 +605,23 @@ exports.updateEvent = async (req, res) => {
       event.maxParticipants = maxParticipants;
     }
 
+    let oldCoverImageFileId;
+
     // Handle cover image update if provided
     if (req.file) {
       updatedFields.push("Cover image updated");
-      event.coverImage = `/uploads/${req.file.filename}`;
+      oldCoverImageFileId = event.coverImageFileId;
+      event.coverImageFileId = await storeImage({
+        buffer: req.file.buffer,
+        filename: req.file.originalname,
+        contentType: req.file.mimetype,
+      });
+      event.coverImage = `/api/events/${event._id}/image`;
     }
 
     // Save the updated event
     await event.save();
+    await deleteImage(oldCoverImageFileId);
 
     // Send notifications to all participants about the event update
     if (event.participants && event.participants.length > 0) {

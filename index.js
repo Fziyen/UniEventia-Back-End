@@ -1,6 +1,5 @@
 require("dotenv").config();
 const express = require("express");
-const path = require("path");
 const mongoose = require("mongoose");
 const cors = require("cors");
 const config = require("./config");
@@ -41,8 +40,6 @@ app.use((req, res, next) => {
 });
 app.use(express.json({ limit: "1mb" }));
 app.use(express.urlencoded({ extended: false, limit: "1mb" }));
-app.use("/uploads", express.static(path.join(__dirname, "uploads")));
-
 if (!config.jwtSecret || config.jwtSecret.length < 32) {
   throw new Error("JWT_SECRET must be configured with at least 32 characters.");
 }

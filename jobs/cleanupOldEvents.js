@@ -1,38 +1,11 @@
-const fs = require("fs");
-const path = require("path");
 const Event = require("../models/Events");
 const Review = require("../models/Reviews");
 const EventComment = require("../models/EventComments");
 const Notification = require("../models/Notifications");
+const { deleteImage } = require("../services/imageStorage");
 
 const DAYS_TO_RETAIN = 31; // Keep events for 31 days after they end
 const CLEANUP_INTERVAL = 24 * 60 * 60 * 1000; // Run cleanup daily
-
-/**
- * Delete a file from the uploads directory
- * @param {string} filePath - The relative file path to delete
- * @returns {Promise<boolean>} - True if file was deleted, false if not found or error
- */
-const deleteFileFromDisk = async (filePath) => {
-  if (!filePath) return false;
-
-  try {
-    // Extract just the filename from the path (e.g., "/uploads/1234567-image.jpg" -> "1234567-image.jpg")
-    const fileName = path.basename(filePath);
-    const fullPath = path.join(__dirname, "../uploads", fileName);
-
-    // Check if file exists
-    if (fs.existsSync(fullPath)) {
-      fs.unlinkSync(fullPath);
-      console.log(`Deleted file: ${fileName}`);
-      return true;
-    }
-    return false;
-  } catch (error) {
-    console.error(`Error deleting file ${filePath}:`, error.message);
-    return false;
-  }
-};
 
 /**
  * Delete an event and all its associated data
@@ -52,10 +25,7 @@ const deleteEventAndAssociatedData = async (event) => {
   try {
     const eventId = event._id;
 
-    // Delete cover image from disk
-    if (event.coverImage) {
-      stats.fileDeleted = await deleteFileFromDisk(event.coverImage);
-    }
+    stats.fileDeleted = await deleteImage(event.coverImageFileId);
 
     // Delete all reviews associated with this event
     const reviewsResult = await Review.deleteMany({ event: eventId });
@@ -209,5 +179,4 @@ module.exports = {
   triggerCleanupNow,
   cleanupOldEvents,
   deleteEventAndAssociatedData,
-  deleteFileFromDisk,
 };

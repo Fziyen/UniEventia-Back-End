@@ -86,7 +86,11 @@ const eventSchema = new mongoose.Schema(
     },
     coverImage: {
       type: String,
-      default: "../uploads/events-default.jpg", // Default cover image path
+      default: null,
+    },
+    coverImageFileId: {
+      type: mongoose.Schema.Types.ObjectId,
+      default: null,
     },
     reviews: [{ type: mongoose.Schema.Types.ObjectId, ref: "Review" }],
     comments: [{ type: mongoose.Schema.Types.ObjectId, ref: "EventComment" }],

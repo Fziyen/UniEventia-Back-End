@@ -13,6 +13,7 @@ const {
   updateEvent,
   triggerCleanupJob,
   cancelParticipation,
+  getEventImage,
 } = require("../controllers/event.controller");
 const { getNotifications } = require("../controllers/notification.controller");
 const auth = require("../middlewares/auth.middleware");
@@ -31,6 +32,7 @@ router.post(
 );
 router.get("/", getEvents);
 router.get("/organizer", auth, getEventsByOrganizer);
+router.get("/:id/image", getEventImage);
 router.delete("/:id/participants/:participantId", auth, removeParticipant);
 router.get("/:id", getEventById);
 router.post("/:id/reviews", auth, leaveReview);
