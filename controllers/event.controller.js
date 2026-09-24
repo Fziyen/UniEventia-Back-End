@@ -398,6 +398,54 @@ exports.addComment = async (req, res) => {
   }
 };
 
+const deleteOwnedEntry = async ({ model, entryId, eventId, userId, field }) => {
+  const entry = await model.findById(entryId);
+  if (!entry || String(entry.event) !== String(eventId)) {
+    return { status: 404, message: "Entry not found." };
+  }
+  if (String(entry.user) !== String(userId)) {
+    return { status: 403, message: "You can only delete your own entry." };
+  }
+
+  await model.deleteOne({ _id: entryId });
+  await Event.findByIdAndUpdate(eventId, { $pull: { [field]: entryId } });
+  return null;
+};
+
+exports.deleteComment = async (req, res) => {
+  try {
+    const result = await deleteOwnedEntry({
+      model: EventComment,
+      entryId: req.params.commentId,
+      eventId: req.params.id,
+      userId: req.user.id,
+      field: "comments",
+    });
+    if (result)
+      return res.status(result.status).json({ message: result.message });
+    return res.status(204).send();
+  } catch (error) {
+    return res.status(400).json({ message: "Comment could not be deleted." });
+  }
+};
+
+exports.deleteReview = async (req, res) => {
+  try {
+    const result = await deleteOwnedEntry({
+      model: Review,
+      entryId: req.params.reviewId,
+      eventId: req.params.id,
+      userId: req.user.id,
+      field: "reviews",
+    });
+    if (result)
+      return res.status(result.status).json({ message: result.message });
+    return res.status(204).send();
+  } catch (error) {
+    return res.status(400).json({ message: "Review could not be deleted." });
+  }
+};
+
 // Participate in an event
 exports.participateEvent = async (req, res) => {
   const eventId = String(req.params.id || req.body.eventId || "").trim();

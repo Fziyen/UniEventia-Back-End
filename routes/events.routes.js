@@ -10,6 +10,8 @@ const {
   getEventsByOrganizer,
   removeParticipant,
   addComment,
+  deleteComment,
+  deleteReview,
   updateEvent,
   triggerCleanupJob,
   cancelParticipation,
@@ -37,6 +39,8 @@ router.delete("/:id/participants/:participantId", auth, removeParticipant);
 router.get("/:id", getEventById);
 router.post("/:id/reviews", auth, leaveReview);
 router.post("/:id/comments", auth, addComment);
+router.delete("/:id/comments/:commentId", auth, deleteComment);
+router.delete("/:id/reviews/:reviewId", auth, deleteReview);
 router.put("/:id/participate", auth, participateEvent);
 router.delete("/:id/participate", auth, cancelParticipation);
 router.put("/:id", auth, uploadimg.single("coverImage"), updateEvent); // Route for updating event details
