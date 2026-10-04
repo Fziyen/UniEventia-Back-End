@@ -1,3 +1,5 @@
+const { Types } = require("mongoose");
+const { promoteWaitlist } = require("../services/waitlist");
 // controllers/event.controller.js
 const Event = require("../models/Events");
 const Notification = require("../models/Notifications");
@@ -12,12 +14,15 @@ const {
 } = require("../services/imageStorage");
 const { deleteEventAndAssociatedData } = require("../services/cascadeDeletion");
 
+const eventHasEnded = event => new Date(event.endDate).getTime() <= Date.now();
+const endedEventMessage = "This event has ended and can no longer be edited.";
+
 const publicProfileFields =
   "fname lname username email emailPublic profilePicture bio role createdAt";
 
 const stripPrivateEmails = (events) => {
   const sanitizeUser = (user) => {
-    if (!user || typeof user !== "object") return user;
+    if (!user || typeof user !== "object" || user._bsontype === "ObjectId") return user;
     const safeUser = user.toObject ? user.toObject() : { ...user };
     if (!safeUser.emailPublic) delete safeUser.email;
     return safeUser;
@@ -46,7 +51,19 @@ const validateEventInput = ({
   endDate,
   location,
   maxParticipants,
+  language, wheelchairAccess, cost, transport, whatToBring,
 }) => {
+  const practical = {};
+  for (const [key, value, limit] of [["language", language, 100], ["cost", cost, 200], ["transport", transport, 2000], ["whatToBring", whatToBring, 2000]]) {
+    if (value !== undefined) {
+      if (typeof value !== "string" || value.trim().length > limit) return { ok: false, message: `${key} must be text of at most ${limit} characters.` };
+      practical[key] = value.trim();
+    }
+  }
+  if (wheelchairAccess !== undefined) {
+    if (!["unknown", "yes", "partial", "no"].includes(wheelchairAccess)) return { ok: false, message: "Choose a valid wheelchair access option." };
+    practical.wheelchairAccess = wheelchairAccess;
+  }
   const normalizedTitle = String(title || "").trim();
   const normalizedDescription = String(description || "").trim();
   const normalizedLocation = String(location || "").trim();
@@ -57,6 +74,10 @@ const validateEventInput = ({
       ok: false,
       message: "Title, description, and location are required.",
     };
+  }
+
+  if (normalizedTitle.length > 200 || normalizedDescription.length > 10000 || normalizedLocation.length > 500) {
+    return { ok: false, message: "Event text exceeds the allowed length." };
   }
 
   if (
@@ -71,6 +92,11 @@ const validateEventInput = ({
     };
   }
 
+  const hasExplicitTime = value => value instanceof Date ||
+    (typeof value === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2})$/.test(value));
+  if (!hasExplicitTime(startDate) || !hasExplicitTime(endDate)) {
+    return { ok: false, message: "Start and end dates must include a time and timezone." };
+  }
   const start = new Date(startDate);
   const end = new Date(endDate);
 
@@ -92,6 +118,7 @@ const validateEventInput = ({
     ok: true,
     message: "Validation successful",
     data: {
+      ...practical,
       title: normalizedTitle,
       description: normalizedDescription,
       startDate,
@@ -139,6 +166,8 @@ const getEventParticipationState = (event, userId) => {
     return "joined";
   }
 
+  if ((event.waitlist || []).some(id => String(id) === String(userId))) return "waitlisted";
+
   return "available";
 };
 
@@ -166,7 +195,7 @@ const checkEventCreationRateLimit = async (organizerId) => {
     // If there's a database error, log it and allow the request to proceed
     console.error("Rate limit check error:", error);
     return {
-      isAllowed: true,
+      isAllowed: false,
       currentCount: 0,
       limit: EVENTS_LIMIT_24H,
       remainingCount: EVENTS_LIMIT_24H,
@@ -218,6 +247,7 @@ exports.createEvent = async (req, res) => {
     const coverImageFile =
       req.files?.coverImage?.[0] || req.files?.image?.[0] || req.file;
     const event = new Event({
+      ...validation.data,
       title,
       description,
       startDate,
@@ -446,138 +476,69 @@ exports.deleteReview = async (req, res) => {
   }
 };
 
-// Participate in an event
+// Joining a full event adds the user to the FIFO waitlist.
 exports.participateEvent = async (req, res) => {
-  const eventId = String(req.params.id || req.body.eventId || "").trim();
+  const eventId = req.params.id;
   const userId = req.user.id;
-
-  const validation = validateParticipationInput({ eventId });
-  if (!validation.ok) {
-    return res.status(400).json({ message: validation.message });
-  }
-
   try {
-    const event = await Event.findById(eventId);
-    if (!event) {
-      return res.status(404).json({ message: "Event not found" });
+    await promoteWaitlist(eventId);
+    const event = await Event.findOneAndUpdate({
+      _id: eventId, organizer: { $ne: userId }, startDate: { $gt: new Date() },
+      participants: { $ne: userId }, waitlist: { $ne: userId },
+    }, [{ $set: {
+      participants: { $cond: [
+        { $and: [{ $lt: [{ $size: { $ifNull: ['$participants', []] } }, { $ifNull: ['$maxParticipants', 50] }] }, { $eq: [{ $size: { $ifNull: ['$waitlist', []] } }, 0] }] },
+        { $concatArrays: [{ $ifNull: ['$participants', []] }, [{ $literal: new Types.ObjectId(userId) }]] }, { $ifNull: ['$participants', []] },
+      ] },
+      waitlist: { $cond: [
+        { $and: [{ $lt: [{ $size: { $ifNull: ['$participants', []] } }, { $ifNull: ['$maxParticipants', 50] }] }, { $eq: [{ $size: { $ifNull: ['$waitlist', []] } }, 0] }] },
+        { $ifNull: ['$waitlist', []] },
+        { $concatArrays: [{ $ifNull: ['$waitlist', []] }, [{ $literal: new Types.ObjectId(userId) }]] },
+      ] },
+    } }], { new: true });
+    const current = event ? await promoteWaitlist(eventId) : await Event.findById(eventId);
+    if (!current) return res.status(404).json({ message: 'Event not found.' });
+    if (String(current.organizer) === String(userId)) return res.status(403).json({ message: 'Organizers cannot join their own events.' });
+    if (new Date(current.startDate) <= new Date()) return res.status(400).json({ message: 'This event is no longer accepting participants.' });
+    const position = (current.waitlist || []).findIndex(id => String(id) === String(userId)) + 1;
+    const status = position ? 'waitlisted' : 'joined';
+    if (event && !position) {
+      try {
+        await Notification.create({ recipient: current.organizer, event: eventId, type: 'participation', message: `A new participant joined your event: ${current.title}` });
+      } catch (error) { console.error('Participation notification failed:', error.message); }
     }
-    if (String(event.organizer) === String(userId)) {
-      return res.status(403).json({
-        message: "Organizers cannot participate in their own events.",
-      });
-    }
-    if (new Date(event.startDate) <= new Date()) {
-      return res
-        .status(400)
-        .json({ message: "This event is no longer accepting participants." });
-    }
-    if (event.participants.length >= event.maxParticipants) {
-      return res
-        .status(409)
-        .json({ message: "This event has reached its participant limit." });
-    }
-
-    const alreadyParticipating = event.participants.some(
-      (participantId) => String(participantId) === String(userId),
-    );
-
-    if (alreadyParticipating) {
-      return res.status(200).json({
-        message: "You are already participating in this event.",
-        event,
-      });
-    }
-
-    event.participants.push(userId);
-    await event.save();
-
-    const notification = new Notification({
-      recipient: event.organizer,
-      event: eventId,
-      message: `A new participant joined your event: ${event.title}`,
-      type: "participation",
-    });
-    await notification.save();
-
-    res.status(201).json({
-      message: "Participation successful",
-      event,
-    });
-  } catch (error) {
-    res.status(400).json({ message: error.message || "Participation failed" });
-  }
+    return res.status(event ? 201 : 200).json({ status, position: position || null, message: position ? `You are on the waitlist at position ${position}.` : 'You are participating in this event.', event: stripPrivateEmails([current])[0] });
+  } catch (error) { return res.status(400).json({ message: 'Could not join this event.' }); }
 };
 
-// Remove a participant from an event owned by the authenticated organizer.
+exports.leaveWaitlist = async (req, res) => {
+  try {
+    const event = await Event.findOneAndUpdate({ _id: req.params.id, waitlist: req.user.id }, { $pull: { waitlist: req.user.id } }, { new: true });
+    if (!event) return res.status(404).json({ message: 'Waitlist entry not found. Refresh to check whether you have been promoted.' });
+    await promoteWaitlist(event._id);
+    return res.status(200).json({ message: 'You left the waitlist.' });
+  } catch (error) { return res.status(400).json({ message: 'Could not leave the waitlist.' }); }
+};
+
 exports.removeParticipant = async (req, res) => {
-  const { id, participantId } = req.params;
   try {
-    const event = await Event.findOne({
-      _id: id,
-      organizer: req.user.id,
-    });
-    if (!event) {
-      return res.status(404).send("Event not found");
-    }
-
-    const wasParticipant = event.participants.some(
-      (userId) => String(userId) === String(participantId),
-    );
-    if (!wasParticipant) {
-      return res
-        .status(404)
-        .send("Participant is not registered for this event");
-    }
-
-    event.participants.pull(participantId);
-    await event.save();
-    res.status(200).json({ message: "Participant removed successfully" });
-  } catch (error) {
-    res.status(400).send(error.message);
-  }
+    const event = await Event.findOneAndUpdate({ _id: req.params.id, organizer: req.user.id, endDate: { $gt: new Date() }, participants: req.params.participantId }, { $pull: { participants: req.params.participantId } }, { new: true });
+    if (!event) return res.status(404).json({ message: 'Event or participant not found, or the event has ended.' });
+    await promoteWaitlist(event._id);
+    return res.status(200).json({ message: 'Participant removed successfully.' });
+  } catch (error) { return res.status(400).json({ message: 'Could not remove participant.' }); }
 };
 
-// Cancel/Withdraw participation from an event (authenticated user removes themselves)
 exports.cancelParticipation = async (req, res) => {
-  const { id } = req.params;
-  const userId = req.user.id;
-
   try {
-    const event = await Event.findById(id).populate("organizer");
-    if (!event) {
-      return res.status(404).json({ message: "Event not found" });
-    }
-
-    const wasParticipant = event.participants.some(
-      (participantId) => String(participantId) === String(userId),
-    );
-
-    if (!wasParticipant) {
-      return res.status(400).json({
-        message: "You are not participating in this event",
-      });
-    }
-
-    // Remove the user from participants
-    event.participants.pull(userId);
-    await event.save();
-
-    // Notify the organizer about cancellation
-    const notification = new Notification({
-      recipient: event.organizer._id,
-      event: event._id,
-      message: `A participant has withdrawn from your event: ${event.title}`,
-      type: "participation",
-    });
-    await notification.save();
-
-    res.status(200).json({
-      message: "You have successfully withdrawn from this event",
-      event,
-    });
-  } catch (error) {
-    res.status(400).json({ message: error.message || "Cancellation failed" });
-  }
+    const event = await Event.findOneAndUpdate({ _id: req.params.id, participants: req.user.id }, { $pull: { participants: req.user.id } }, { new: true });
+    if (!event) return res.status(404).json({ message: 'Participation not found.' });
+    const updated = await promoteWaitlist(event._id);
+    try {
+      await Notification.create({ recipient: event.organizer, event: event._id, type: 'participation', message: `A participant has withdrawn from your event: ${event.title}` });
+    } catch (error) { console.error('Withdrawal notification failed:', error.message); }
+    return res.status(200).json({ message: 'You have withdrawn from this event.', event: stripPrivateEmails([updated])[0] });
+  } catch (error) { return res.status(400).json({ message: 'Could not withdraw from this event.' }); }
 };
 
 // Delete an event
@@ -587,6 +548,9 @@ exports.deleteEvent = async (req, res) => {
     const event = await Event.findById(id);
     if (!event) {
       return res.status(404).send("Event not found");
+    }
+    if (String(event.organizer) !== String(req.user.id)) {
+      return res.status(403).json({ message: "Only the organizer can delete this event." });
     }
     await deleteEventAndAssociatedData(event);
     res.status(200).json({ message: "Event deleted successfully" });
@@ -605,6 +569,12 @@ exports.updateCoverImage = async (req, res) => {
     if (!event) {
       return res.status(404).send("Event not found");
     }
+    if (String(event.organizer) !== String(req.user.id)) {
+      return res.status(403).json({ message: "Only the organizer can change this image." });
+    }
+    if (eventHasEnded(event)) {
+      return res.status(403).json({ message: endedEventMessage });
+    }
     const oldImageFileId = event.coverImageFileId;
     event.coverImageFileId = await storeImage({
       buffer: req.file.buffer,
@@ -612,9 +582,15 @@ exports.updateCoverImage = async (req, res) => {
       contentType: req.file.mimetype,
     });
     event.coverImage = `/api/events/${event._id}/image`;
-    await event.save();
+    const saved = await Event.findOneAndUpdate({
+      _id: event._id, organizer: req.user.id, endDate: { $gt: new Date() },
+    }, { $set: { coverImage: event.coverImage, coverImageFileId: event.coverImageFileId } }, { new: true });
+    if (!saved) {
+      await deleteImage(event.coverImageFileId);
+      return res.status(409).json({ message: "The event ended or changed. Refresh before editing." });
+    }
     await deleteImage(oldImageFileId);
-    res.status(200).json(event);
+    res.status(200).json(saved);
   } catch (error) {
     res.status(400).send(error.message);
   }
@@ -630,7 +606,7 @@ exports.updateEvent = async (req, res) => {
   }
 
   try {
-    const event = await Event.findById(id).populate("organizer participants");
+    const event = await Event.findById(id).populate("organizer participants", publicProfileFields);
     if (!event) {
       return res.status(404).json({ message: "Event not found" });
     }
@@ -642,6 +618,13 @@ exports.updateEvent = async (req, res) => {
       });
     }
 
+    // Check the stored end time before accepting replacement dates from the request.
+    if (eventHasEnded(event)) {
+      return res.status(403).json({ message: endedEventMessage });
+    }
+    if (validation.data.maxParticipants < event.participants.length) {
+      return res.status(400).json({ message: "Capacity cannot be lower than the current participant count." });
+    }
     // Track which fields were updated
     const updatedFields = [];
     const {
@@ -689,6 +672,12 @@ exports.updateEvent = async (req, res) => {
       event.maxParticipants = maxParticipants;
     }
 
+    for (const key of ["language", "wheelchairAccess", "cost", "transport", "whatToBring"]) {
+      if (validation.data[key] !== undefined && event[key] !== validation.data[key]) {
+        event[key] = validation.data[key];
+        updatedFields.push("Accessibility and practical details updated");
+      }
+    }
     let oldCoverImageFileId;
 
     // Handle cover image update if provided
@@ -703,8 +692,18 @@ exports.updateEvent = async (req, res) => {
       event.coverImage = `/api/events/${event._id}/image`;
     }
 
-    // Save the updated event
-    await event.save();
+    // Check live attendance and update capacity in the same write.
+    const saved = await Event.findOneAndUpdate({
+      _id: id, organizer: req.user.id, endDate: { $gt: new Date() },
+      $expr: { $lte: [{ $size: '$participants' }, maxParticipants] },
+    }, { $set: {
+      ...validation.data,
+      ...(req.file ? { coverImage: event.coverImage, coverImageFileId: event.coverImageFileId } : {}),
+    } }, { new: true, runValidators: true });
+    if (!saved) {
+      if (req.file) await deleteImage(event.coverImageFileId);
+      return res.status(409).json({ message: "The event ended or attendance changed. Refresh before editing." });
+    }
     await deleteImage(oldCoverImageFileId);
 
     // Send notifications to all participants about the event update
@@ -727,12 +726,15 @@ exports.updateEvent = async (req, res) => {
       await Promise.all(notificationPromises);
     }
 
-    // Populate the response with full details
-    await event.populate("organizer participants reviews comments");
+    await promoteWaitlist(event._id);
+    // Reload after promotion so the response includes the current queue.
+    const currentEvent = await Event.findById(event._id);
+    await currentEvent.populate("organizer participants", publicProfileFields);
+    await currentEvent.populate("reviews comments");
 
     res.status(200).json({
       message: "Event updated successfully",
-      event,
+      event: stripPrivateEmails([currentEvent])[0],
     });
   } catch (error) {
     res.status(400).json({ message: error.message || "Event update failed" });

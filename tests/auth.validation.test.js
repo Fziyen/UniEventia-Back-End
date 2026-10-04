@@ -1,6 +1,8 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
+process.env.JWT_SECRET = "test-only-secret-with-at-least-32-characters";
+
 const {
   validateSignupInput,
   verifyRecaptchaToken,

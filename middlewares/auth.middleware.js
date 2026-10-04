@@ -11,7 +11,10 @@ const auth = async (req, res, next) => {
   const token = authHeader.replace(/^Bearer\s+/i, "");
 
   try {
-    const decoded = jwt.verify(token, config.jwtSecret);
+    const decoded = jwt.verify(token, config.jwtSecret, { algorithms: ["HS256"] });
+    if (typeof decoded.id !== "string" || !/^[a-f0-9]{24}$/i.test(decoded.id)) {
+      return res.status(401).send("Invalid token.");
+    }
     const user = await User.findById(decoded.id).select("role");
 
     if (!user) {

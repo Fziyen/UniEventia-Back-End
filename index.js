@@ -2,6 +2,7 @@ require("dotenv").config();
 const express = require("express");
 const mongoose = require("mongoose");
 const cors = require("cors");
+const { rateLimit } = require("express-rate-limit");
 const config = require("./config");
 const authRoutes = require("./routes/auth.routes");
 const eventRoutes = require("./routes/events.routes");
@@ -38,6 +39,8 @@ app.use((req, res, next) => {
   );
   next();
 });
+app.use("/api", rateLimit({ windowMs: 15 * 60 * 1000, limit: 600, standardHeaders: "draft-8", legacyHeaders: false }));
+app.use("/api/auth", rateLimit({ windowMs: 15 * 60 * 1000, limit: 30, standardHeaders: "draft-8", legacyHeaders: false }));
 app.use(express.json({ limit: "1mb" }));
 app.use(express.urlencoded({ extended: false, limit: "1mb" }));
 if (!config.jwtSecret || config.jwtSecret.length < 32) {
@@ -68,9 +71,10 @@ app.use("/api/notifications", userNotification);
 app.use((error, req, res, next) => {
   console.error("Unhandled request error:", error);
   if (res.headersSent) return next(error);
-  res.status(error.statusCode || 500).json({
+  const status = error.name === "MulterError" ? (error.code === "LIMIT_FILE_SIZE" ? 413 : 400) : error.statusCode || error.status || 500;
+  res.status(status).json({
     message:
-      error.statusCode && error.statusCode < 500
+      status < 500
         ? error.message
         : "An unexpected server error occurred.",
   });

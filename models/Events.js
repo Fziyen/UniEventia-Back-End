@@ -78,6 +78,12 @@ const eventSchema = new mongoose.Schema(
       required: true,
     },
     participants: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
+    waitlist: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
+    language: { type: String, maxlength: 100, default: "" },
+    wheelchairAccess: { type: String, enum: ["unknown", "yes", "partial", "no"], default: "unknown" },
+    cost: { type: String, maxlength: 200, default: "" },
+    transport: { type: String, maxlength: 2000, default: "" },
+    whatToBring: { type: String, maxlength: 2000, default: "" },
     maxParticipants: {
       type: Number,
       required: true,

@@ -1,8 +1,6 @@
 const defaultFrontendOrigins = [
   "http://localhost:3000",
   "http://127.0.0.1:3000",
-  "https://*.vercel.app",
-  "https://*.netlify.app",
 ];
 
 function normalizeOrigins(value) {
@@ -23,13 +21,6 @@ function isAllowedOrigin(origin, allowedOrigins = []) {
     if (!allowedOrigin) return false;
 
     const pattern = allowedOrigin.trim().replace(/\/+$/, "");
-
-    if (pattern.includes("*")) {
-      const escapedPattern = pattern
-        .replace(/[.+?^${}()|[\]\\]/g, "\\$&")
-        .replace(/\\\*/g, ".*");
-      return new RegExp(`^${escapedPattern}$`, "i").test(normalizedOrigin);
-    }
 
     return normalizedOrigin === pattern;
   });

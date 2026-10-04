@@ -47,7 +47,7 @@ const validateSignupInput = ({
   const normalizedEmail = String(email || "")
     .trim()
     .toLowerCase();
-  const normalizedPassword = String(password || "").trim();
+  const normalizedPassword = typeof password === "string" ? password : "";
   const normalizedRole = normalizeRole(role);
 
   if (!firstName || !lastName) {
@@ -100,10 +100,10 @@ const validateSignupInput = ({
     };
   }
 
-  if (normalizedPassword.length < 8 || normalizedPassword.length > 128) {
+  if (normalizedPassword.length < 8 || Buffer.byteLength(normalizedPassword, "utf8") > 72) {
     return {
       ok: false,
-      message: "Password must be between 8 and 128 characters long.",
+      message: "Password must contain at least 8 characters and at most 72 UTF-8 bytes.",
     };
   }
 
@@ -159,6 +159,7 @@ const verifyRecaptchaToken = async (token, expectedAction) => {
         headers: {
           "Content-Type": "application/x-www-form-urlencoded; charset=utf-8",
         },
+        signal: AbortSignal.timeout(10000),
         body: new URLSearchParams({
           secret: config.recaptchaSecretKey,
           response: responseToken,
@@ -172,7 +173,8 @@ const verifyRecaptchaToken = async (token, expectedAction) => {
       !response.ok ||
       !payload.success ||
       payload.action !== expectedAction ||
-      Number(payload.score) < config.recaptchaMinScore
+      !Number.isFinite(payload.score) ||
+      payload.score < config.recaptchaMinScore
     ) {
       console.warn("reCAPTCHA rejected authentication request", {
         action: payload.action,
@@ -201,8 +203,8 @@ const createAuthSession = (user) => {
   const safeUser = user.toObject ? user.toObject() : { ...user };
   delete safeUser.password;
 
-  const jwtSecret =
-    config.jwtSecret || "development-test-secret-must-be-at-least-32-chars";
+  const jwtSecret = config.jwtSecret;
+  if (!jwtSecret || jwtSecret.length < 32) throw new Error("JWT_SECRET must contain at least 32 characters.");
 
   const token = jwt.sign({ id: safeUser._id, role: safeUser.role }, jwtSecret, {
     expiresIn: "4h",
@@ -256,7 +258,7 @@ exports.register = async (req, res) => {
     await newUser.save();
     const session = createAuthSession(newUser);
 
-    console.log("User registered successfully:", session.user);
+
     res.status(201).json({
       message: "User registered successfully",
       token: session.token,
@@ -278,7 +280,10 @@ exports.login = async (req, res) => {
   const identifier = normalizeLoginIdentifier(
     req.body.identifier ?? req.body.email ?? req.body.username,
   );
-  const password = String(req.body.password || "").trim();
+  const password = typeof req.body.password === "string" ? req.body.password : "";
+  if (!identifier || identifier.length > 254 || !password || Buffer.byteLength(password, "utf8") > 72) {
+    return res.status(401).json({ message: "Invalid username/email or password" });
+  }
 
   const captcha = await verifyRecaptchaToken(req.body.recaptcha, "login");
   if (!captcha.ok) {
@@ -296,10 +301,10 @@ exports.login = async (req, res) => {
           },
         },
       ],
-    });
+    }).select("+password");
 
     if (!user) {
-      console.error("User not found with identifier:", identifier);
+
       return res
         .status(401)
         .json({ message: "Invalid username/email or password" });
@@ -314,7 +319,7 @@ exports.login = async (req, res) => {
 
     const session = createAuthSession(user);
 
-    console.log("User logged in successfully:", session.user);
+
     res.status(200).json({
       token: session.token,
       user: session.user,

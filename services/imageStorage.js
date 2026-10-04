@@ -8,8 +8,19 @@ const getBucket = () => {
   return new GridFSBucket(mongoose.connection.db, { bucketName: "images" });
 };
 
+const validateImage = (buffer, contentType) => {
+  if (!Buffer.isBuffer(buffer) || buffer.length > 5 * 1024 * 1024) return false;
+  if (contentType === "image/png") return buffer.length >= 24 && buffer.subarray(0, 8).equals(Buffer.from([137,80,78,71,13,10,26,10]));
+  if (contentType === "image/jpeg") return buffer.length >= 4 && buffer[0] === 255 && buffer[1] === 216 && buffer[2] === 255;
+  if (contentType === "image/gif") return buffer.length >= 10 && ["GIF87a", "GIF89a"].includes(buffer.toString("ascii", 0, 6));
+  return false;
+};
+
 const storeImage = ({ buffer, filename, contentType }) =>
   new Promise((resolve, reject) => {
+    if (!validateImage(buffer, contentType)) {
+      return reject(new Error("Invalid image content."));
+    }
     const uploadStream = getBucket().openUploadStream(filename, {
       contentType,
       metadata: { kind: "application-image" },
@@ -58,4 +69,4 @@ const deleteImage = async (fileId) => {
   }
 };
 
-module.exports = { storeImage, getImage, streamImage, deleteImage };
+module.exports = { validateImage, storeImage, getImage, streamImage, deleteImage };

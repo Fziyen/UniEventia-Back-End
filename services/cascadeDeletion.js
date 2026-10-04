@@ -3,6 +3,7 @@ const Review = require("../models/Reviews");
 const EventComment = require("../models/EventComments");
 const Registration = require("../models/Registrations");
 const Notification = require("../models/Notifications");
+const { promoteWaitlist } = require("./waitlist");
 const { deleteImage } = require("./imageStorage");
 
 const deleteEventAndAssociatedData = async (event) => {
@@ -52,6 +53,7 @@ const deleteUserAndAssociatedData = async (user) => {
     userDeleted: false,
   };
 
+  const joinedEvents = await Event.find({ participants: userId }).select("_id");
   const ownedEvents = await Event.find({ organizer: userId });
   for (const event of ownedEvents) {
     const eventStats = await deleteEventAndAssociatedData(event);
@@ -76,12 +78,15 @@ const deleteUserAndAssociatedData = async (user) => {
       {
         $pull: {
           participants: userId,
+          waitlist: userId,
           reviews: { $in: reviewIds },
           comments: { $in: commentIds },
         },
       },
     ),
   ]);
+
+  for (const event of joinedEvents) await promoteWaitlist(event._id);
 
   stats.reviewsDeleted = reviews.length;
   stats.commentsDeleted = comments.length;

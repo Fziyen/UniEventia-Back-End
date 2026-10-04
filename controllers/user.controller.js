@@ -87,7 +87,7 @@ const validateProfileUpdateInput = (payload = {}) => {
   }
 
   if (payload.role !== undefined) {
-    const role = normalizeRole(payload.role);
+    const role = payload.role;
     if (role !== "Organizer" && role !== "Participant") {
       return { ok: false, message: "Role must be Organizer or Participant." };
     }
@@ -103,6 +103,10 @@ const validateProfileUpdateInput = (payload = {}) => {
       return { ok: false, message: "Email visibility must be true or false." };
     }
     updates.emailPublic = payload.emailPublic;
+  }
+
+  if ((updates.fname?.length || 0) > 50 || (updates.lname?.length || 0) > 50 || (updates.email?.length || 0) > 254 || (updates.bio?.length || 0) > 2000) {
+    return { ok: false, message: "Profile text exceeds the allowed length." };
   }
 
   if (Object.keys(updates).length === 0) {
@@ -129,8 +133,8 @@ exports.getUserProfile = async (req, res) => {
 
 exports.getAllUsers = async (req, res) => {
   try {
-    const page = Math.max(1, Number(req.query.page || 1));
-    const limit = Math.min(15, Math.max(1, Number(req.query.limit || 15)));
+    const page = Math.min(10000, Math.max(1, Math.floor(Number(req.query.page) || 1)));
+    const limit = Math.min(15, Math.max(1, Math.floor(Number(req.query.limit) || 15)));
     const search = String(req.query.search || "").trim();
     const escapedSearch = search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const query = search

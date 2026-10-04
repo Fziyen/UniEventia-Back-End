@@ -44,7 +44,7 @@
 //   fname: { type: String, required: true },
 //   lname: { type: String, required: true },
 //   email: { type: String, required: true, unique: true },
-//   password: { type: String, required: true },
+//   password: { type: String, required: true, select: false },
 //   role: {
 //     type: String,
 //     enum: ["Organizer", "Participant"],
@@ -76,7 +76,7 @@ const userSchema = new mongoose.Schema({
     type: Boolean,
     default: false,
   },
-  password: { type: String, required: true },
+  password: { type: String, required: true, select: false },
   profilePicture: {
     type: String,
     default: null,
